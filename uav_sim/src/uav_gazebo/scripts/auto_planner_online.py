@@ -5,7 +5,8 @@ import numpy as np
 
 from scipy.optimize import minimize
 
-from std_msgs.msg import Float32MultiArray
+# from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, Int32
 from geometry_msgs.msg import Point, PoseStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from nav_msgs.msg import Path
@@ -20,7 +21,7 @@ from tf.transformations import euler_from_quaternion
 START_POS = (0.0, 0.0)
 FLIGHT_Z = 1.5
 
-SAFETY_MARGIN = 0.8
+SAFETY_MARGIN = 0.6
 MAX_WAYPOINT_DIST = 2.0
 
 CYL_LENGTH = 2.0
@@ -420,56 +421,56 @@ class AutoPlannerNode:
         self.lidar_max_use_range = 6.0
         self.lidar_min_use_range = 0.25
         self.lidar_front_angle = math.radians(180.0)
-        self.lidar_bin_angle = math.radians(3.0)
+        self.lidar_bin_angle = math.radians(5.0)
 
-        self.lidar_obstacle_radius = 0.25
+        self.lidar_obstacle_radius = 0.35
         self.has_online_plan = False
         # 只有前方這個距離內有障礙物才重規劃
-        self.front_block_threshold = 1.0
+        self.front_block_threshold = 1.75
         self.obstacle_memory = []
-        self.obstacle_memory_merge_dist = 0.7
-        self.obstacle_memory_max_age = rospy.Duration(20.0)
+        self.obstacle_memory_merge_dist = 1.0
+        self.obstacle_memory_max_age = rospy.Duration(10.0)
 
         # 判斷 blocked 用的前方角度，建議比 scan_to_obstacles 更窄
         self.front_block_angle = math.radians(90.0)
 
         self.obstacle_pub = rospy.Publisher(
-            "/planner/obstacles_marker",
+            "/planner/online/obstacles_marker",
             MarkerArray,
             queue_size=1,
             latch=True
         )
 
         self.waypoint_pub = rospy.Publisher(
-            "/planner/waypoints_marker",
+            "/planner/online/waypoints_marker",
             MarkerArray,
             queue_size=1,
             latch=True
         )
 
         self.los_marker_pub = rospy.Publisher(
-            "/planner/los_marker",
+            "/planner/online/los_marker",
             Marker,
             queue_size=1,
             latch=True
         )
 
         self.min_snap_marker_pub = rospy.Publisher(
-            "/planner/min_snap_marker",
+            "/planner/online/min_snap_marker",
             Marker,
             queue_size=1,
             latch=True
         )
 
         self.los_path_pub = rospy.Publisher(
-            "/planner/los_path",
+            "/planner/online/los_path",
             Path,
             queue_size=1,
             latch=True
         )
 
         self.min_snap_path_pub = rospy.Publisher(
-            "/planner/min_snap_path",
+            "/planner/online/min_snap_path",
             Path,
             queue_size=1,
             latch=True
@@ -493,7 +494,7 @@ class AutoPlannerNode:
             self.target_callback
         )
         rospy.Subscriber(
-            "/planner/replan_start",
+            "/planner/online/replan_start",
             Float32MultiArray,
             self.replan_start_callback
         )
@@ -502,6 +503,22 @@ class AutoPlannerNode:
             rospy.Duration(1.0),
             self.online_plan_timer
         )
+        self.active_mode = -1
+        self.online_enabled = False
+
+        rospy.Subscriber(
+            "/planner/active_mode",
+            Int32,
+            self.active_mode_callback
+        )
+
+    def active_mode_callback(self, msg):
+        self.active_mode = msg.data
+        self.online_enabled = (self.active_mode == 9)
+
+        if not self.online_enabled:
+            self.has_online_plan = False
+            self.obstacle_memory = []
 
     def obstacle_callback(self, msg):
         data = list(msg.data)
@@ -620,6 +637,13 @@ class AutoPlannerNode:
         rospy.loginfo("Published new /planner/min_snap_path")
     
     def replan_start_callback(self, msg):
+        if not self.online_enabled:
+            rospy.loginfo_throttle(
+                1.0,
+                "Ignoring online replan request because active_mode=%d"
+                % self.active_mode
+            )
+            return
         data = list(msg.data)
 
         if len(data) < 2:
@@ -748,6 +772,8 @@ class AutoPlannerNode:
         return blocked
     
     def online_plan_timer(self, event):
+        if not self.online_enabled:
+            return
         if self.latest_scan is None:
             rospy.logwarn_throttle(1.0, "Waiting for /lidar_360/scan ...")
             return
@@ -988,7 +1014,7 @@ class AutoPlannerNode:
 
 
 def main():
-    rospy.init_node("auto_planner")
+    rospy.init_node("auto_planner_online")
     AutoPlannerNode()
     rospy.spin()
 

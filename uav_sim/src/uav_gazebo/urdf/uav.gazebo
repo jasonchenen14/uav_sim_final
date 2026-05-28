@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot>
   <gazebo reference="link">
-    <material>Gazebo/Orange</material>
+    <material>Gazebo/White</material>
     <gravity>true</gravity>
     
     <sensor name="imu_sensor" type="imu">
@@ -98,8 +98,8 @@
           <horizontal>
             <samples>360</samples>
             <resolution>1</resolution>
-            <min_angle>-3.14159</min_angle>
-            <max_angle>3.14159</max_angle>
+            <min_angle>-2.35619</min_angle>
+            <max_angle>2.35619</max_angle>
           </horizontal>
         </scan>
 

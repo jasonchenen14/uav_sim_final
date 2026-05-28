@@ -9,10 +9,12 @@
     <arg name="debug" value="false"/>
   </include>
   <node pkg="uav_gazebo" type="random_world_gen.py" name="random_world_gen"  output="screen" />
-  <!-- <node pkg="uav_gazebo" type="auto_planner.py" name="auto_planner"  output="screen" /> -->
+  <node pkg="uav_gazebo" type="auto_planner.py" name="auto_planner"  output="screen" />
   <node pkg="uav_gazebo" type="auto_planner_online.py" name="auto_planner_online"  output="screen" />
   <node pkg="uav_gazebo" type="uav_rviz_tracker.py" name="uav_rviz_tracker"  output="screen" />
   <node pkg="rviz" type="rviz" name="rviz"  output="screen" args="-d $(find uav_gazebo)/rviz/planner.rviz" />
+  <node pkg="rqt_image_view" type="rqt_image_view" name="rqt_tag_view" output="screen" args="/tag_detections_image"> </node>
+  <node pkg="rqt_image_view" type="rqt_image_view" name="rqt_front_camera_view" output="screen" args="/front_camera/image_raw"> </node>
 
   <param name="robot_description"
     command="$(find xacro)/xacro --inorder '$(find uav_gazebo)/urdf/uav.xacro'" />

@@ -6,6 +6,7 @@ from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Point, PoseStamped
 from visualization_msgs.msg import Marker
 from nav_msgs.msg import Path
+from std_msgs.msg import Int32
 
 
 class UAVRvizTracker:
@@ -29,15 +30,48 @@ class UAVRvizTracker:
 
         self.path_msg = Path()
         self.path_msg.header.frame_id = self.frame_id
+        # 降低 RViz 更新頻率，避免 Gazebo model_states 太高頻造成 RViz delay
+        self.last_pub_time = rospy.Time(0)
+        self.pub_period = rospy.Duration(0.1)  # 10 Hz
+        # actual path 不要太密
+        self.max_path_points = 500
+        self.path_min_dist = 0.05
+        self.last_path_x = None
+        self.last_path_y = None
+        self.last_path_z = None
+
+        # 目前 flight mode，用來切 mode 時清 actual path
+        self.active_mode = -1
 
         rospy.Subscriber(
             "/gazebo/model_states",
             ModelStates,
             self.model_states_callback
         )
+        rospy.Subscriber(
+            "/planner/active_mode",
+            Int32,
+            self.active_mode_callback
+        )
 
         rospy.loginfo("uav_rviz_tracker started.")
         rospy.spin()
+
+    def active_mode_callback(self, msg):
+        new_mode = msg.data
+
+        if new_mode != self.active_mode:
+            self.active_mode = new_mode
+
+            # 切 mode 時清掉 UAV 實際飛行路徑，避免 offline/online 混在一起
+            self.path_msg = Path()
+            self.path_msg.header.frame_id = self.frame_id
+
+            self.last_path_x = None
+            self.last_path_y = None
+            self.last_path_z = None
+
+            rospy.loginfo("UAV RViz tracker: active_mode=%d, actual path cleared" % self.active_mode)
 
     def model_states_callback(self, msg):
         if rospy.is_shutdown():
@@ -55,6 +89,12 @@ class UAVRvizTracker:
         x = pose.position.x
         y = pose.position.y
         z = pose.position.z
+        now = rospy.Time.now()
+
+        if now - self.last_pub_time < self.pub_period:
+            return
+
+        self.last_pub_time = now
 
         # Publish UAV marker
         marker = Marker()
@@ -82,22 +122,39 @@ class UAVRvizTracker:
 
         # self.uav_marker_pub.publish(marker)
 
-        # Publish actual path
-        pose_stamped = PoseStamped()
-        pose_stamped.header.frame_id = self.frame_id
-        pose_stamped.header.stamp = rospy.Time.now()
+        append_path = False
 
-        pose_stamped.pose.position.x = x
-        pose_stamped.pose.position.y = y
-        pose_stamped.pose.position.z = z
-        pose_stamped.pose.orientation = pose.orientation
+        if self.last_path_x is None:
+            append_path = True
+        else:
+            dx = x - self.last_path_x
+            dy = y - self.last_path_y
+            dz = z - self.last_path_z
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
 
-        self.path_msg.header.stamp = rospy.Time.now()
-        self.path_msg.poses.append(pose_stamped)
+            if dist > self.path_min_dist:
+                append_path = True
 
-        # 避免 path 無限變長
-        if len(self.path_msg.poses) > 500:
-            self.path_msg.poses.pop(0)
+        if append_path:
+            pose_stamped = PoseStamped()
+            pose_stamped.header.frame_id = self.frame_id
+            pose_stamped.header.stamp = now
+
+            pose_stamped.pose.position.x = x
+            pose_stamped.pose.position.y = y
+            pose_stamped.pose.position.z = z
+            pose_stamped.pose.orientation = pose.orientation
+
+            self.path_msg.header.stamp = now
+            self.path_msg.poses.append(pose_stamped)
+
+            self.last_path_x = x
+            self.last_path_y = y
+            self.last_path_z = z
+
+            # 避免 path 無限變長
+            if len(self.path_msg.poses) > self.max_path_points:
+                self.path_msg.poses = self.path_msg.poses[-self.max_path_points:]
 
         try:
             if not rospy.is_shutdown():

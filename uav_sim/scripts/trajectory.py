@@ -5,7 +5,8 @@ import rospy
 from apriltag_ros.msg import AprilTagDetectionArray
 from gazebo_msgs.srv import GetModelState
 from nav_msgs.msg import Path
-from std_msgs.msg import Float32MultiArray
+# from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, Int32
 
 
 class Trajectory:
@@ -105,7 +106,9 @@ class Trajectory:
         self.tag_q = None
 
          # Planner path tracking
-        self.planner_path_sub_initialized = False
+        # self.planner_path_sub_initialized = False
+        self.offline_path_sub_initialized = False
+        self.online_path_sub_initialized = False
         self.planner_path_received = False
 
         self.planner_path_points = []
@@ -128,8 +131,13 @@ class Trajectory:
         self.return_to_search_if_tag_lost = True
         self.tag_lost_return_timeout = 1.0
         self.tag_lost_since = None
-        self.planner_replan_pub = rospy.Publisher(
-            "/planner/replan_start",
+        self.offline_replan_pub = rospy.Publisher(
+            "/planner/offline/replan_start",
+            Float32MultiArray,
+            queue_size=1
+        )
+        self.online_replan_pub = rospy.Publisher(
+            "/planner/online/replan_start",
             Float32MultiArray,
             queue_size=1
         )
@@ -139,6 +147,12 @@ class Trajectory:
         self.online_path_request_time = rospy.Time(0)
         self.online_goal_xy = np.array([15.0, -0.0])
         self.online_goal_reach_radius = 0.6
+        self.planner_mode_pub = rospy.Publisher(
+            "/planner/active_mode",
+            Int32,
+            queue_size=1,
+            latch=True
+        )
         
 
 
@@ -153,8 +167,10 @@ class Trajectory:
             self.is_mode_changed = True
             self.mode = mode
             self.mark_traj_start()
+            self.planner_mode_pub.publish(Int32(self.mode))
 
         self.calculate_desired()
+        self.planner_mode_pub.publish(Int32(self.mode))
 
         desired = (self.xd, self.xd_dot, self.xd_2dot, self.xd_3dot, \
             self.xd_4dot, self.b1d, self.b1d_dot, self.b1d_2dot, self.is_landed)
@@ -795,15 +811,17 @@ class Trajectory:
         return np.arctan2(siny_cosp, cosy_cosp)
     
     def init_planner_path_subscriber(self):
-        if not self.planner_path_sub_initialized:
+        if not self.offline_path_sub_initialized:
             rospy.Subscriber(
-                "/planner/min_snap_path",
+                "/planner/offline/min_snap_path",
                 Path,
                 self.planner_path_callback
             )
-            self.planner_path_sub_initialized = True
-            print("Planner path subscriber initialized")
+            self.offline_path_sub_initialized = True
+            print("Offline Planner path subscriber initialized")
     def planner_path_callback(self, msg):
+        if self.mode != 8:
+            return
         if msg.header.stamp < self.planner_replan_request_time:
             rospy.logwarn_throttle(1.0, "Ignoring old planner path")
             return
@@ -856,7 +874,7 @@ class Trajectory:
             msg.data = [start_x, start_y]
 
             self.planner_replan_request_time = rospy.Time.now()
-            self.planner_replan_pub.publish(msg)
+            self.offline_replan_pub.publish(msg)
             self.planner_replan_sent = True
 
             rospy.loginfo(
@@ -1029,7 +1047,9 @@ class Trajectory:
             return
         
     def online_planner_path_callback(self, msg):
-            # 忽略重新進入 online planner 前的舊 path
+        if self.mode != 9:
+            return
+        # 忽略重新進入 online planner 前的舊 path
         if msg.header.stamp < self.online_path_request_time:
             rospy.logwarn_throttle(1.0, "Ignoring old ONLINE planner path")
             return
@@ -1062,13 +1082,13 @@ class Trajectory:
         rospy.loginfo("Received ONLINE planner path with %d points", len(points))
 
     def init_online_planner_path_subscriber(self):
-        if not self.planner_path_sub_initialized:
+        if not self.online_path_sub_initialized:
             rospy.Subscriber(
-                "/planner/min_snap_path",
+                "/planner/online/min_snap_path",
                 Path,
                 self.online_planner_path_callback
             )
-            self.planner_path_sub_initialized = True
+            self.online_path_sub_initialized = True
             print("Online planner path subscriber initialized")
 
     def online_planner_path_follow(self):
@@ -1105,7 +1125,7 @@ class Trajectory:
 
             self.online_path_request_time = rospy.Time.now()
             self.planner_replan_request_time = self.online_path_request_time
-            self.planner_replan_pub.publish(msg)
+            self.online_replan_pub.publish(msg)
             self.planner_replan_sent = True
 
             rospy.loginfo(
@@ -1206,7 +1226,16 @@ class Trajectory:
         self.xd_3dot = np.zeros(3)
         self.xd_4dot = np.zeros(3)
 
-        self.b1d = self.get_current_b1()
+        if np.linalg.norm(direction[0:2]) > 1e-6:
+            yaw_des = np.arctan2(direction[1], direction[0])
+
+            self.b1d = np.array([
+                np.cos(yaw_des),
+                np.sin(yaw_des),
+                0.0
+            ])
+        else:
+            self.b1d = self.get_current_b1()
         self.b1d_dot = np.zeros(3)
         self.b1d_2dot = np.zeros(3)
 

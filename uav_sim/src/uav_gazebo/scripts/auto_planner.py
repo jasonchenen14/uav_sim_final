@@ -5,7 +5,8 @@ import numpy as np
 
 from scipy.optimize import minimize
 
-from std_msgs.msg import Float32MultiArray
+# from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, Int32
 from geometry_msgs.msg import Point, PoseStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from nav_msgs.msg import Path
@@ -404,42 +405,42 @@ class AutoPlannerNode:
         self.has_planned = False
 
         self.obstacle_pub = rospy.Publisher(
-            "/planner/obstacles_marker",
+            "/planner/offline/obstacles_marker",
             MarkerArray,
             queue_size=1,
             latch=True
         )
 
         self.waypoint_pub = rospy.Publisher(
-            "/planner/waypoints_marker",
+            "/planner/offline/waypoints_marker",
             MarkerArray,
             queue_size=1,
             latch=True
         )
 
         self.los_marker_pub = rospy.Publisher(
-            "/planner/los_marker",
+            "/planner/offline/los_marker",
             Marker,
             queue_size=1,
             latch=True
         )
 
         self.min_snap_marker_pub = rospy.Publisher(
-            "/planner/min_snap_marker",
+            "/planner/offline/min_snap_marker",
             Marker,
             queue_size=1,
             latch=True
         )
 
         self.los_path_pub = rospy.Publisher(
-            "/planner/los_path",
+            "/planner/offline/los_path",
             Path,
             queue_size=1,
             latch=True
         )
 
         self.min_snap_path_pub = rospy.Publisher(
-            "/planner/min_snap_path",
+            "/planner/offline/min_snap_path",
             Path,
             queue_size=1,
             latch=True
@@ -457,12 +458,24 @@ class AutoPlannerNode:
             self.target_callback
         )
         rospy.Subscriber(
-            "/planner/replan_start",
+            "/planner/offline/replan_start",
             Float32MultiArray,
             self.replan_start_callback
         )
+        self.active_mode = -1
+        self.offline_enabled = False
+
+        rospy.Subscriber(
+            "/planner/active_mode",
+            Int32,
+            self.active_mode_callback
+        )
 
         rospy.loginfo("auto_planner waiting for /planner/obstacle_list and /planner/target_xy")
+
+    def active_mode_callback(self, msg):
+        self.active_mode = msg.data
+        self.offline_enabled = (self.active_mode == 8)
 
     def obstacle_callback(self, msg):
         data = list(msg.data)
@@ -578,6 +591,13 @@ class AutoPlannerNode:
         rospy.loginfo("Published new /planner/min_snap_path")
     
     def replan_start_callback(self, msg):
+        if not self.offline_enabled:
+            rospy.loginfo_throttle(
+                1.0,
+                "Ignoring offline replan request because active_mode=%d"
+                % self.active_mode
+            )
+            return
         data = list(msg.data)
 
         if len(data) < 2:
@@ -595,7 +615,7 @@ class AutoPlannerNode:
 
 
 def main():
-    rospy.init_node("auto_planner")
+    rospy.init_node("auto_planner_offline")
     AutoPlannerNode()
     rospy.spin()
 
