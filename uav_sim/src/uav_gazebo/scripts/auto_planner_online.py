@@ -6,11 +6,12 @@ import numpy as np
 from scipy.optimize import minimize
 
 # from std_msgs.msg import Float32MultiArray
-from std_msgs.msg import Float32MultiArray, Int32
+from std_msgs.msg import Float32MultiArray, Int32, Bool
 from geometry_msgs.msg import Point, PoseStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from nav_msgs.msg import Path
-from sensor_msgs.msg import LaserScan
+# from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, Image
 from gazebo_msgs.msg import ModelStates
 from tf.transformations import euler_from_quaternion
 
@@ -511,6 +512,34 @@ class AutoPlannerNode:
             Int32,
             self.active_mode_callback
         )
+        self.depth_topic = rospy.get_param(
+            "~depth_topic",
+            "/depth_camera/depth/image_raw"
+        )
+
+        self.depth_enabled = True
+        self.depth_affects_planner = True
+        self.depth_blocked = False
+        self.depth_min = float("inf")
+        self.depth_mean = float("inf")
+        self.depth_close_ratio = 0.0
+        self.depth_last_time = rospy.Time(0)
+        self.depth_roi_w_ratio = 0.35
+        self.depth_roi_h_ratio = 0.35
+        self.depth_trigger_distance = 0.2
+        self.depth_trigger_ratio = 0.8    
+        self.depth_timeout = rospy.Duration(0.5)
+        rospy.Subscriber(
+            self.depth_topic,
+            Image,
+            self.depth_callback
+        )
+
+        self.depth_blocked_pub = rospy.Publisher(
+            "/planner/online/depth_camera_blocked",
+            Bool,
+            queue_size=1
+        )
 
     def active_mode_callback(self, msg):
         self.active_mode = msg.data
@@ -771,6 +800,97 @@ class AutoPlannerNode:
 
         return blocked
     
+    def depth_callback(self, msg):
+        if not self.online_enabled:
+            return
+
+        if not self.depth_enabled:
+            return
+
+        ok, depth = self.depth_msg_to_meters(msg)
+
+        if not ok:
+            rospy.logwarn_throttle(
+                1.0,
+                "Depth camera: unsupported encoding=%s"
+                % msg.encoding
+            )
+            return
+
+        h, w = depth.shape
+
+        roi_w = int(w * self.depth_roi_w_ratio)
+        roi_h = int(h * self.depth_roi_h_ratio)
+
+        x0 = int((w - roi_w) / 2)
+        y0 = int((h - roi_h) / 2)
+        x1 = x0 + roi_w
+        y1 = y0 + roi_h
+
+        roi = depth[y0:y1, x0:x1]
+
+        valid = np.isfinite(roi)
+        valid = valid & (roi > 0.05) & (roi < 20.0)
+
+        if np.count_nonzero(valid) < 10:
+            self.depth_blocked = False
+            self.depth_min = float("inf")
+            self.depth_mean = float("inf")
+            self.depth_close_ratio = 0.0
+            return
+
+        valid_depth = roi[valid]
+
+        self.depth_min = float(np.min(valid_depth))
+        self.depth_mean = float(np.mean(valid_depth))
+
+        close = valid_depth < self.depth_trigger_distance
+        self.depth_close_ratio = float(np.mean(close))
+
+        self.depth_blocked = (
+            self.depth_min < self.depth_trigger_distance and
+            self.depth_close_ratio > self.depth_trigger_ratio
+        )
+
+        self.depth_last_time = rospy.Time.now()
+        self.depth_blocked_pub.publish(Bool(self.depth_blocked))
+
+        rospy.loginfo_throttle(
+            1.0,
+            "Depth camera check | blocked=%s | min=%.2f m | mean=%.2f m | close_ratio=%.2f | affects_planner=%s"
+            % (
+                str(self.depth_blocked),
+                self.depth_min,
+                self.depth_mean,
+                self.depth_close_ratio,
+                str(self.depth_affects_planner)
+            )
+        )
+    def depth_msg_to_meters(self, msg):
+        try:
+            h = int(msg.height)
+            w = int(msg.width)
+            enc = msg.encoding.upper()
+
+            if enc == "32FC1":
+                depth = np.frombuffer(msg.data, dtype=np.float32).reshape((h, w))
+                return True, depth
+
+            elif enc == "16UC1":
+                depth_mm = np.frombuffer(msg.data, dtype=np.uint16).reshape((h, w))
+                depth_m = depth_mm.astype(np.float32) / 1000.0
+                return True, depth_m
+
+            else:
+                return False, None
+
+        except Exception as e:
+            rospy.logwarn_throttle(
+                1.0,
+                "Depth conversion failed: %s" % str(e)
+            )
+            return False, None
+    
     def online_plan_timer(self, event):
         if not self.online_enabled:
             return
@@ -794,7 +914,26 @@ class AutoPlannerNode:
         need_initial_plan = not self.has_online_plan
 
         # 後續只有前方真的有障礙物才重規劃
-        blocked = self.front_blocked(self.latest_scan)
+        lidar_blocked = self.front_blocked(self.latest_scan)
+        depth_recent = (
+            rospy.Time.now() - self.depth_last_time
+        ) < self.depth_timeout
+        if self.depth_affects_planner and depth_recent:
+            blocked = lidar_blocked or self.depth_blocked
+        else:
+            blocked = lidar_blocked
+
+        rospy.loginfo_throttle(
+            1.0,
+            "Obstacle decision | lidar=%s | depth=%s | depth_recent=%s | final=%s"
+            % (
+                str(lidar_blocked),
+                str(self.depth_blocked),
+                str(depth_recent),
+                str(blocked)
+            )
+        )
+
 
         if (not need_initial_plan) and (not blocked):
             rospy.loginfo_throttle(
@@ -906,7 +1045,7 @@ class AutoPlannerNode:
         self.los_path_pub.publish(make_path_msg(waypoints))
         self.min_snap_path_pub.publish(make_path_msg(min_snap_points))
 
-        rospy.loginfo("Online planning done. Published /planner/min_snap_path")
+        rospy.loginfo("Online planning done. Published /planner/online/min_snap_path")
 
     def normalize_angle(self, a):
         return math.atan2(math.sin(a), math.cos(a))

@@ -51,6 +51,48 @@
         <frameName>front_camera_link</frameName>
       </plugin>
     </sensor>
+    <!-- Front depth camera for visual obstacle distance monitoring -->
+    <sensor name="depth_camera" type="depth">
+      <always_on>true</always_on>
+      <update_rate>15</update_rate>
+      <visualize>true</visualize>
+
+      <!-- pose relative to UAV body link: x y z roll pitch yaw -->
+      <!-- same direction as front camera -->
+      <pose>0.25 0 -0.05 0 0 0</pose>
+
+      <camera name="depth_camera">
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>320</width>
+          <height>240</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.10</near>
+          <far>10.0</far>
+        </clip>
+      </camera>
+
+      <plugin name="depth_camera_controller" filename="libgazebo_ros_depth_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <updateRate>15.0</updateRate>
+
+        <cameraName>depth_camera</cameraName>
+
+        <imageTopicName>image_raw</imageTopicName>
+        <cameraInfoTopicName>camera_info</cameraInfoTopicName>
+
+        <depthImageTopicName>depth/image_raw</depthImageTopicName>
+        <depthImageCameraInfoTopicName>depth/camera_info</depthImageCameraInfoTopicName>
+        <pointCloudTopicName>points</pointCloudTopicName>
+
+        <frameName>depth_camera_link</frameName>
+
+        <pointCloudCutoff>0.10</pointCloudCutoff>
+        <pointCloudCutoffMax>10.0</pointCloudCutoffMax>
+      </plugin>
+    </sensor>
 
     <!-- Down camera for AprilTag / visual landing -->
     <sensor name="down_camera" type="camera">
