@@ -1,0 +1,184 @@
+<?xml version="1.0"?>
+<robot>
+  <gazebo reference="link">
+    <material>Gazebo/White</material>
+    <gravity>true</gravity>
+    
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <visualize>true</visualize>
+      <plugin filename="libgazebo_ros_imu_sensor.so" name="imu_plugin">
+        <topicName>uav_imu</topicName>
+        <bodyName>link</bodyName>
+        <updateRateHZ>100.0</updateRateHZ>
+        <gaussianNoise>0.0001</gaussianNoise>
+        <xyzOffset>0 0 0</xyzOffset>
+        <rpyOffset>0 0 0</rpyOffset>
+        <frameName>uav_imu</frameName>
+      </plugin>
+      <pose>0 0 0 0 0 0</pose>
+    </sensor>
+    <!-- Front camera for AprilTag / visual landing -->
+    <sensor name="front_camera" type="camera">
+      <always_on>true</always_on>
+      <update_rate>30</update_rate>
+      <visualize>true</visualize>
+
+      <!-- pose relative to UAV link: x y z roll pitch yaw -->
+      <!-- x forward, y left, z up/down depends on Gazebo link frame -->
+      <pose>0.25 0 -0.05 0 0 0</pose>
+
+      <camera name="front_camera">
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.05</near>
+          <far>100</far>
+        </clip>
+      </camera>
+
+      <plugin name="front_camera_controller" filename="libgazebo_ros_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <updateRate>30.0</updateRate>
+        <cameraName>front_camera</cameraName>
+        <imageTopicName>image_raw</imageTopicName>
+        <cameraInfoTopicName>camera_info</cameraInfoTopicName>
+        <frameName>front_camera_link</frameName>
+      </plugin>
+    </sensor>
+    <!-- Front depth camera for visual obstacle distance monitoring -->
+    <sensor name="depth_camera" type="depth">
+      <always_on>true</always_on>
+      <update_rate>15</update_rate>
+      <visualize>true</visualize>
+
+      <!-- pose relative to UAV body link: x y z roll pitch yaw -->
+      <!-- same direction as front camera -->
+      <pose>0.25 0 -0.05 0 0 0</pose>
+
+      <camera name="depth_camera">
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>320</width>
+          <height>240</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.10</near>
+          <far>10.0</far>
+        </clip>
+      </camera>
+
+      <plugin name="depth_camera_controller" filename="libgazebo_ros_depth_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <updateRate>15.0</updateRate>
+
+        <cameraName>depth_camera</cameraName>
+
+        <imageTopicName>image_raw</imageTopicName>
+        <cameraInfoTopicName>camera_info</cameraInfoTopicName>
+
+        <depthImageTopicName>depth/image_raw</depthImageTopicName>
+        <depthImageCameraInfoTopicName>depth/camera_info</depthImageCameraInfoTopicName>
+        <pointCloudTopicName>points</pointCloudTopicName>
+
+        <frameName>depth_camera_link</frameName>
+
+        <pointCloudCutoff>0.10</pointCloudCutoff>
+        <pointCloudCutoffMax>10.0</pointCloudCutoffMax>
+      </plugin>
+    </sensor>
+
+    <!-- Down camera for AprilTag / visual landing -->
+    <sensor name="down_camera" type="camera">
+      <always_on>true</always_on>
+      <update_rate>30</update_rate>
+      <visualize>true</visualize>
+
+      <!-- pose relative to UAV link: x y z roll pitch yaw -->
+      <!-- x forward, y left, z up/down depends on Gazebo link frame -->
+      <pose>0.0 0 -0.05 0 1.5708 0</pose>
+
+      <camera name="down_camera">
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.05</near>
+          <far>100</far>
+        </clip>
+      </camera>
+
+      <plugin name="down_camera_controller" filename="libgazebo_ros_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <updateRate>30.0</updateRate>
+        <cameraName>down_camera</cameraName>
+        <imageTopicName>image_raw</imageTopicName>
+        <cameraInfoTopicName>camera_info</cameraInfoTopicName>
+        <frameName>down_camera_link</frameName>
+      </plugin>
+    </sensor>
+    <!-- 360-degree 2D LiDAR for obstacle avoidance -->
+    <sensor name="lidar_360" type="ray">
+      <always_on>true</always_on>
+      <update_rate>20</update_rate>
+      <visualize>true</visualize>
+
+      <!-- pose relative to UAV body link: x y z roll pitch yaw -->
+      <pose>0 0 0.05 0 0 0</pose>
+
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>360</samples>
+            <resolution>1</resolution>
+            <min_angle>-2.35619</min_angle>
+            <max_angle>2.35619</max_angle>
+          </horizontal>
+        </scan>
+
+        <range>
+          <min>0.10</min>
+          <max>10.0</max>
+          <resolution>0.01</resolution>
+        </range>
+
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>
+        </noise>
+      </ray>
+
+      <plugin name="lidar_360_controller" filename="libgazebo_ros_laser.so">
+        <topicName>/lidar_360/scan</topicName>
+        <frameName>lidar_360_link</frameName>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="pose_3d_plugin" filename="libgazebo_ros_p3d.so">
+      <bodyName>link</bodyName>
+      <topicName>uav_pos</topicName>
+      <frameName>world</frameName>
+      <gaussianNoise>0.01</gaussianNoise>
+      <updateRate>10</updateRate>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="uav_fm" filename="libcontrol_plugin.so">
+      <bodyName>link</bodyName>
+      <topicName>uav_fm</topicName>
+    </plugin>
+  </gazebo>
+</robot>

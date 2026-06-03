@@ -1,0 +1,19 @@
+<launch>
+  <node pkg="apriltag_ros" type="apriltag_ros_continuous_node" name="apriltag_ros" output="screen">
+
+    <!-- 改成你的下視相機 topic -->
+    <remap from="image_rect" to="/down_camera/image_raw"/>
+    <remap from="camera_info" to="/down_camera/camera_info"/>
+
+    <param name="camera_frame" value="down_camera_link"/>
+    <param name="publish_tag_detections_image" value="true"/>
+    <param name="remove_duplicates" value="true"/>
+
+    <rosparam param="standalone_tags">
+      [
+        {id: 0, size: 0.5, name: "tag_0"}
+      ]
+    </rosparam>
+  </node>
+  <node pkg="uav_gazebo" type="tag_monitor.py" name="tag_monitor" output="screen" />
+</launch>
